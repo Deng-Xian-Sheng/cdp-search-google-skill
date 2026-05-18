@@ -45,7 +45,25 @@ search_text、to_pagination、get_info不能同时传入，一次只能传入一
 		"ws://127.0.0.1:9224",
 	)
 
-	ctx, _ := chromedp.NewContext(allocatorCtx)
+	// 先创建临时 chromedp context 用于查询已有标签页
+	tmpCtx, _ := chromedp.NewContext(allocatorCtx)
+
+	var ctx context.Context
+	targets, err := chromedp.Targets(tmpCtx)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// 复用已有的 page 标签页，没有才用临时创建的
+	for _, t := range targets {
+		if t.Type == "page" {
+			ctx, _ = chromedp.NewContext(allocatorCtx, chromedp.WithTargetID(t.TargetID))
+			break
+		}
+	}
+	if ctx == nil {
+		ctx = tmpCtx
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -87,9 +105,9 @@ search_text、to_pagination、get_info不能同时传入，一次只能传入一
 			log.Fatal(searchResults.Error)
 		}
 
-		fmt.Printf("搜索「%s」共 %d 条结果（第1页）：\n", *searchText, searchResults.Count)
+		fmt.Printf("搜索\"%s\"共 %d 条结果（第1页）：\n", *searchText, searchResults.Count)
 		for _, r := range searchResults.Results {
-			fmt.Printf("  [%d] %s\n", r.Index, r.Title)
+			fmt.Printf("[%d] %s\n", r.Index, r.Title)
 		}
 		return
 	}
@@ -180,10 +198,10 @@ func waitForWebResults() chromedp.ActionFunc {
 // extractSearchResultsJS 定位搜索结果并提取标题列表。
 //
 // 定位策略（不依赖任何文本内容或随机 class 名）：
-//   1. Google 搜索结果容器 div#rso 的 ID 稳定
-//   2. 每个搜索结果都是一个 a 标签包裹（或包含）一个 h3
-//   3. 通过 h3.closest('a') 找到包装链接，用 href 去重
-//   4. 排除 "People also ask"（相关问题）区域中的 h3，它们不是真正的搜索结果
+//  1. Google 搜索结果容器 div#rso 的 ID 稳定
+//  2. 每个搜索结果都是一个 a 标签包裹（或包含）一个 h3
+//  3. 通过 h3.closest('a') 找到包装链接，用 href 去重
+//  4. 排除 "People also ask"（相关问题）区域中的 h3，它们不是真正的搜索结果
 const extractSearchResultsJS = `(function(){
 	var container = document.getElementById('rso');
 	if (!container) return JSON.stringify({count:0,results:[],error:"找不到搜索结果容器div#rso"});
