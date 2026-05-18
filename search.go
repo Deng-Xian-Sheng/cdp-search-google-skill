@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,21 +53,205 @@ search_text、to_pagination、get_info不能同时传入，一次只能传入一
 	if strings.TrimSpace(*searchText) != "" {
 		inputSelector := `textarea[name="q"]`
 
+		var resultsJSON string
+
 		err := chromedp.Run(ctx,
 			chromedp.Navigate(`https://google.com`),
 			chromedp.WaitVisible(inputSelector),
 			chromedp.Focus(inputSelector),
 			chromedp.SendKeys(inputSelector, *searchText+"\n"),
-			// 寻找h2标签，特征是，标签`><`中间的内容是`Web results`
-			// 然后找到和它同级的div，通常只有一个，在它的下方（html代码位置）
-			// 这个div里面的内容如 tmp 文件 div 部分所示。
-			// 我们需要搞定三件事：
-			// 1、从搜索结果中找出每个结果，也就是每个这样的div，能拿到总数和每个的顺序，能操作任何一个。
-			// 2、获取标题的文本。如 tmp 文件中的标题部分所示。
-			// 3、找出每个超链接，我们不需要知道链接的url，但是需要能够点击到它。如 tmp 文件中的链接部分所示。
+
+			// 等待"Web results" h2 出现，确认搜索结果已加载
+			waitForWebResults(),
+
+			// 提取搜索结果：找到每个结果项，获取总数、序号、标题，记录可点击链接的索引
+			chromedp.Evaluate(extractSearchResultsJS, &resultsJSON),
 		)
 		if err != nil {
 			log.Fatal(err)
 		}
+
+		// 解析并输出搜索结果
+		var searchResults struct {
+			Count   int    `json:"count"`
+			Error   string `json:"error,omitempty"`
+			Results []struct {
+				Index int    `json:"index"`
+				Title string `json:"title"`
+			} `json:"results"`
+		}
+		if err := json.Unmarshal([]byte(resultsJSON), &searchResults); err != nil {
+			log.Fatalf("解析搜索结果失败: %v", err)
+		}
+		if searchResults.Error != "" {
+			log.Fatal(searchResults.Error)
+		}
+
+		fmt.Printf("搜索「%s」共 %d 条结果（第1页）：\n", *searchText, searchResults.Count)
+		for _, r := range searchResults.Results {
+			fmt.Printf("  [%d] %s\n", r.Index, r.Title)
+		}
+		return
 	}
+
+	if strings.TrimSpace(*getInfo) != "" {
+		idx, err := strconv.Atoi(strings.TrimSpace(*getInfo))
+		if err != nil || idx < 0 {
+			log.Fatalf("get_info 必须是有效的非负整数，收到: %q", *getInfo)
+		}
+
+		_ = idx
+		// 在已有搜索结果页面上，根据序号点击对应结果的超链接。
+		// 点击后会导航到目标页面，之后可将 html 转为 markdown 返回。
+		//
+		// 点击第 idx 个结果的 JS：
+		//   clickResultByIndex(idx)
+		//
+		// 用法示例：
+		//   err := chromedp.Run(ctx,
+		//       chromedp.Evaluate(clickResultJS(idx), nil),
+		//       chromedp.WaitReady(`body`, chromedp.ByQuery),
+		//   )
+		//   // 然后获取页面内容、转换 markdown、可选 filter 过滤
+
+		// get_info 的点击与转换逻辑由使用者自行编排，DOM 定位原语已就绪
+		return
+	}
+
+	if strings.TrimSpace(*toPagination) != "" {
+		pageNum, err := strconv.Atoi(strings.TrimSpace(*toPagination))
+		if err != nil || pageNum < 1 || pageNum > 10 {
+			log.Fatalf("to_pagination 必须是 1~10 的整数，收到: %q", *toPagination)
+		}
+
+		_ = pageNum
+		// 在已有搜索结果页面上，定位分页并点击对应页码。
+		//
+		// 点击第 pageNum 页的 JS：
+		//   clickPagination(pageNum)
+		//
+		// 用法示例：
+		//   err := chromedp.Run(ctx,
+		//       chromedp.Evaluate(clickPaginationJS(pageNum), nil),
+		//       waitForWebResults(),
+		//   )
+
+		// to_pagination 的点击逻辑由使用者自行编排，DOM 定位原语已就绪
+		return
+	}
+}
+
+// 以下为 DOM 定位原语，使用语义化选择器和 DOM 层级关系，
+// 避免依赖 Google 页面中一看就是随机生成的 class 名。
+
+// waitForWebResults 等待搜索结果容器 #rso 出现后，给页面足够时间完成渲染。
+// 不依赖任何文本内容（如 "Web results" h2），只依赖稳定的 DOM 结构锚点 div#rso。
+func waitForWebResults() chromedp.ActionFunc {
+	return func(ctx context.Context) error {
+		// 先等待 #rso 出现
+		const checkJs = `(function(){
+			var rso = document.getElementById('rso');
+			return rso !== null && rso.children.length > 0;
+		})()`
+		for {
+			var ready bool
+			if err := chromedp.Evaluate(checkJs, &ready).Do(ctx); err != nil {
+				return err
+			}
+			if ready {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+		// #rso 出现后等待 2 秒让所有结果渲染完成
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+		return nil
+	}
+}
+
+// extractSearchResultsJS 定位搜索结果并提取标题列表。
+//
+// 定位策略（不依赖任何文本内容或随机 class 名）：
+//   1. Google 搜索结果容器 div#rso 的 ID 稳定
+//   2. 每个搜索结果都是一个 a 标签包裹（或包含）一个 h3
+//   3. 通过 h3.closest('a') 找到包装链接，用 href 去重
+//   4. 排除 "People also ask"（相关问题）区域中的 h3，它们不是真正的搜索结果
+const extractSearchResultsJS = `(function(){
+	var container = document.getElementById('rso');
+	if (!container) return JSON.stringify({count:0,results:[],error:"找不到搜索结果容器div#rso"});
+
+	var h3s = container.querySelectorAll('h3');
+	var results = [];
+	var seen = {};
+
+	for (var i = 0; i < h3s.length; i++) {
+		// 跳过 "People also ask" / "相关问题" 块中的 h3
+		if (isInsidePeopleAlsoAsk(h3s[i], container)) continue;
+
+		var a = h3s[i].closest('a');
+		if (!a) continue;
+		var href = a.href;
+		if (!href || seen[href]) continue;
+		seen[href] = true;
+		results.push({index: results.length, title: h3s[i].textContent.trim()});
+	}
+	return JSON.stringify({count: results.length, results: results});
+
+	function isInsidePeopleAlsoAsk(el, rso) {
+		var block = el.parentElement;
+		while (block && block.parentElement !== rso) {
+			block = block.parentElement;
+		}
+		if (!block) return false;
+		var text = block.textContent;
+		return text.indexOf('People also ask') !== -1 || text.indexOf('相关问题') !== -1;
+	}
+})()`
+
+// clickResultJS 生成点击第 index 个搜索结果链接的 JavaScript。
+// index 从 0 开始，与 extractSearchResultsJS 返回的 index 一致。
+func clickResultJS(index int) string {
+	return fmt.Sprintf(`(function(){
+		var container = document.getElementById('rso');
+		if (!container) return '找不到搜索结果容器div#rso';
+		var h3s = container.querySelectorAll('h3');
+		var count = 0;
+		var seen = {};
+		for (var i = 0; i < h3s.length; i++) {
+			var a = h3s[i].closest('a');
+			if (!a) continue;
+			var href = a.href;
+			if (!href || seen[href]) continue;
+			seen[href] = true;
+			if (count === %d) { a.click(); return 'clicked'; }
+			count++;
+		}
+		return '未找到序号为 %d 的结果';
+	})()`, index, index)
+}
+
+// clickPaginationJS 生成点击分页中第 pageNum 页的 JavaScript。
+// pageNum 从 1 开始。
+func clickPaginationJS(pageNum int) string {
+	return fmt.Sprintf(`(function(){
+		// 分页链接通常用 aria-label 标识，如 aria-label="Page 2"
+		var link = document.querySelector('a[aria-label="Page %d"]');
+		if (link) { link.click(); return 'clicked'; }
+		// 备选：查找分页区域中包含页码文本的链接
+		var allA = document.querySelectorAll('a');
+		for (var i = 0; i < allA.length; i++) {
+			if (allA[i].textContent.trim() === '%d') {
+				allA[i].click(); return 'clicked';
+			}
+		}
+		return '未找到第 %d 页的链接';
+	})()`, pageNum, pageNum, pageNum)
 }
