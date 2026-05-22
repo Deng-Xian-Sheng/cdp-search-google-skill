@@ -20,6 +20,11 @@ PowerCommand="${BinFilePath} --remote-debugging-port=${CDP_PORT} --user-data-dir
 # [1860866:1860866:0517/144305.608400:ERROR:ui/aura/env.cc:246] The platform failed to initialize.  Exiting.
 export DISPLAY=":0"
 
+# 不设置则无法在浏览器上用输入法输入中文
+export GTK_IM_MODULE=fcitx
+export QT_IM_MODULE=fcitx
+export XMODIFIERS="@im=fcitx"
+
 if lsof -i :${CDP_PORT} >/dev/null 2>&1; then
     echo "端口${CDP_PORT}已被占用，无法启动浏览器。"
     exit 1
