@@ -16,7 +16,7 @@ import (
 
 func main() {
 	searchText := flag.String("search_text", "", "要搜索的文本。会返回搜索结果，包含分页页码、每项结果。每项结果包含序号、标题。")
-	toPagination := flag.String("to_pagination", "", "搜索结果是带分页的，这是页码，想看第几页就传几，支持1~10（具体以最大分页为准）。")
+	toPagination := flag.String("to_pagination", "", "搜索结果是带分页的，这是页码，想看第几页就传几，支持1~10(实际取min(10,最大分页))。")
 	getInfo := flag.String("get_info", "", "根据搜索结果的序号查看页面详细信息，会将html转换成markdown返回。")
 	filter := flag.String("filter", "", "通过传入支持Go regexp2的正则表达式过滤页面详细信息markdown。（推荐，为用户节省token。）")
 
@@ -92,27 +92,7 @@ search_text、to_pagination、get_info不能同时传入，一次只能传入一
 		if err != nil {
 			log.Fatal(err)
 		}
-
-		// 解析并输出搜索结果
-		var searchResults struct {
-			Count   int    `json:"count"`
-			Error   string `json:"error,omitempty"`
-			Results []struct {
-				Index int    `json:"index"`
-				Title string `json:"title"`
-			} `json:"results"`
-		}
-		if err := json.Unmarshal([]byte(resultsJSON), &searchResults); err != nil {
-			log.Fatalf("解析搜索结果失败: %v", err)
-		}
-		if searchResults.Error != "" {
-			log.Fatal(searchResults.Error)
-		}
-
-		fmt.Printf("搜索\"%s\"共 %d 条结果（第1页/共%d页）：\n", *searchText, searchResults.Count, maxPage)
-		for _, r := range searchResults.Results {
-			fmt.Printf("[%d] %s\n", r.Index, r.Title)
-		}
+		parsePrint(resultsJSON, searchText, 1, maxPage)
 		return
 	}
 
@@ -146,20 +126,52 @@ search_text、to_pagination、get_info不能同时传入，一次只能传入一
 			log.Fatalf("to_pagination 必须是 1~10 的整数，收到: %q", *toPagination)
 		}
 
-		_ = pageNum
+		var resultsJSON string
+		var maxPage int
 		// 在已有搜索结果页面上，定位分页并点击对应页码。
-		//
-		// 点击第 pageNum 页的 JS：
-		//   clickPagination(pageNum)
-		//
-		// 用法示例：
-		//   err := chromedp.Run(ctx,
-		//       chromedp.Evaluate(clickPaginationJS(pageNum), nil),
-		//       waitForWebResults(),
-		//   )
+		err = chromedp.Run(ctx,
+			chromedp.Evaluate(clickPaginationJS(pageNum), nil),
+			// 等待"Web results" h2 出现，确认搜索结果已加载
+			waitForWebResults(),
 
-		// to_pagination 的点击逻辑由使用者自行编排，DOM 定位原语已就绪
+			// 提取搜索结果：找到每个结果项，获取总数、序号、标题，记录可点击链接的索引
+			chromedp.Evaluate(extractSearchResultsJS, &resultsJSON),
+
+			// 提取最大分页数
+			chromedp.Evaluate(extractMaxPageJS, &maxPage),
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+		parsePrint(resultsJSON, searchText, pageNum, maxPage)
 		return
+	}
+}
+
+func parsePrint(resultsJSON string, searchText *string, currentPage, maxPage int) {
+	// 解析并输出搜索结果
+	var searchResults struct {
+		Count   int    `json:"count"`
+		Error   string `json:"error,omitempty"`
+		Results []struct {
+			Index int    `json:"index"`
+			Title string `json:"title"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(resultsJSON), &searchResults); err != nil {
+		log.Fatalf("解析搜索结果失败: %v", err)
+	}
+	if searchResults.Error != "" {
+		log.Fatal(searchResults.Error)
+	}
+
+	if *searchText != "" {
+		fmt.Printf("搜索\"%s\"共 %d 条结果（第%d页/共%d页）：\n", *searchText, searchResults.Count, currentPage, maxPage)
+	} else {
+		fmt.Printf("共 %d 条结果（第%d页/共%d页）：\n", searchResults.Count, currentPage, maxPage)
+	}
+	for _, r := range searchResults.Results {
+		fmt.Printf("[%d] %s\n", r.Index, r.Title)
 	}
 }
 
