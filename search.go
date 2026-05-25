@@ -16,7 +16,7 @@ import (
 
 func main() {
 	searchText := flag.String("search_text", "", "要搜索的文本。会返回搜索结果，包含分页页码、每项结果。每项结果包含序号、标题。")
-	toPagination := flag.String("to_pagination", "", "搜索结果是带分页的，这是页码，想看第几页就传几，支持1~10。")
+	toPagination := flag.String("to_pagination", "", "搜索结果是带分页的，这是页码，想看第几页就传几，支持1~10（具体以最大分页为准）。")
 	getInfo := flag.String("get_info", "", "根据搜索结果的序号查看页面详细信息，会将html转换成markdown返回。")
 	filter := flag.String("filter", "", "通过传入支持Go regexp2的正则表达式过滤页面详细信息markdown。（推荐，为用户节省token。）")
 
@@ -72,6 +72,7 @@ search_text、to_pagination、get_info不能同时传入，一次只能传入一
 		inputSelector := `textarea[name="q"]`
 
 		var resultsJSON string
+		var maxPage int
 
 		err := chromedp.Run(ctx,
 			chromedp.Navigate(`https://google.com`),
@@ -84,6 +85,9 @@ search_text、to_pagination、get_info不能同时传入，一次只能传入一
 
 			// 提取搜索结果：找到每个结果项，获取总数、序号、标题，记录可点击链接的索引
 			chromedp.Evaluate(extractSearchResultsJS, &resultsJSON),
+
+			// 提取最大分页数
+			chromedp.Evaluate(extractMaxPageJS, &maxPage),
 		)
 		if err != nil {
 			log.Fatal(err)
@@ -105,7 +109,7 @@ search_text、to_pagination、get_info不能同时传入，一次只能传入一
 			log.Fatal(searchResults.Error)
 		}
 
-		fmt.Printf("搜索\"%s\"共 %d 条结果（第1页）：\n", *searchText, searchResults.Count)
+		fmt.Printf("搜索\"%s\"共 %d 条结果（第1页/共%d页）：\n", *searchText, searchResults.Count, maxPage)
 		for _, r := range searchResults.Results {
 			fmt.Printf("[%d] %s\n", r.Index, r.Title)
 		}
@@ -234,6 +238,19 @@ const extractSearchResultsJS = `(function(){
 	}
 })()`
 
+// extractMaxPageJS 从分页 DOM 中提取最大页码。
+// 定位策略：查找所有带 aria-label="Page N" 的链接，取最大 N。
+// 如果页面只有一页结果（没有分页链接），返回 1。
+const extractMaxPageJS = `(function(){
+	var links = document.querySelectorAll('a[aria-label^="Page "]');
+	var max = 1;
+	for (var i = 0; i < links.length; i++) {
+		var n = parseInt(links[i].getAttribute('aria-label').replace('Page ', ''));
+		if (!isNaN(n) && n > max) max = n;
+	}
+	return max;
+})()`
+
 // clickResultJS 生成点击第 index 个搜索结果链接的 JavaScript。
 // index 从 0 开始，与 extractSearchResultsJS 返回的 index 一致。
 func clickResultJS(index int) string {
@@ -258,18 +275,11 @@ func clickResultJS(index int) string {
 
 // clickPaginationJS 生成点击分页中第 pageNum 页的 JavaScript。
 // pageNum 从 1 开始。
+// 定位策略：Google 分页链接使用 aria-label="Page N"，语义稳定。
 func clickPaginationJS(pageNum int) string {
 	return fmt.Sprintf(`(function(){
-		// 分页链接通常用 aria-label 标识，如 aria-label="Page 2"
 		var link = document.querySelector('a[aria-label="Page %d"]');
 		if (link) { link.click(); return 'clicked'; }
-		// 备选：查找分页区域中包含页码文本的链接
-		var allA = document.querySelectorAll('a');
-		for (var i = 0; i < allA.length; i++) {
-			if (allA[i].textContent.trim() === '%d') {
-				allA[i].click(); return 'clicked';
-			}
-		}
 		return '未找到第 %d 页的链接';
-	})()`, pageNum, pageNum, pageNum)
+	})()`, pageNum, pageNum)
 }
