@@ -26,6 +26,8 @@ export GTK_IM_MODULE=fcitx
 export QT_IM_MODULE=fcitx
 export XMODIFIERS="@im=fcitx"
 
+# 上面这俩环境变量对于macos应该没影响，如果有影响可能需要去掉
+
 if lsof -i :${CDP_PORT} >/dev/null 2>&1; then
     echo "端口${CDP_PORT}已被占用，无法启动浏览器。"
     exit 1

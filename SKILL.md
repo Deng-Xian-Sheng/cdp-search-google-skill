@@ -78,3 +78,8 @@ go run search.go -get_info 0 -filter "正则表达式"
 ## 诊断 DOM
 
 遇到 DOM 定位问题时，在 `probe/` 目录下写临时 Go 文件连接 9224 端口查看实际 DOM 结构。优先使用语义化选择器和稳定的 ID/aria 属性，避免依赖 Google 随机生成的 class 名。
+
+## 注意事项
+
+- 仅支持macos和linux
+- 如果用户说谷歌浏览器已经安装了，但是你发现 start_browser.sh 提示找不到谷歌浏览器，那说明不在PATH中，你可以查找谷歌浏览器的二进制路径并编辑 start_browser.sh 修改 GoogleChromePath 变量。
