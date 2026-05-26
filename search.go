@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
+	"github.com/dlclark/regexp2"
+	md "github.com/JohannesKaufmann/html-to-markdown"
 )
 
 func main() {
@@ -19,8 +21,6 @@ func main() {
 	toPagination := flag.String("to_pagination", "", "搜索结果是带分页的，这是页码，想看第几页就传几，支持1~10(实际取min(10,最大分页))。")
 	getInfo := flag.String("get_info", "", "根据搜索结果的序号查看页面详细信息，会将html转换成markdown返回。")
 	filter := flag.String("filter", "", "通过传入支持Go regexp2的正则表达式过滤页面详细信息markdown。（推荐，为用户节省token。）")
-
-	_ = filter
 
 	flag.Usage = func() {
 		flag.PrintDefaults()
@@ -34,10 +34,14 @@ search_text、to_pagination、get_info不能同时传入，一次只能传入一
 
 	flag.Parse()
 
-	if strings.TrimSpace(*searchText) == "" && strings.TrimSpace(*toPagination) == "" && strings.TrimSpace(*getInfo) == "" {
+	if strings.TrimSpace(*searchText) == "" && strings.TrimSpace(*toPagination) == "" && strings.TrimSpace(*getInfo) == "" && strings.TrimSpace(*filter) == "" {
 		log.Println("用法错误，你没有传入任何参数")
 		flag.Usage()
 		os.Exit(1)
+	}
+
+	if strings.TrimSpace(*filter) != "" && strings.TrimSpace(*getInfo) == "" {
+		log.Fatal("传入 -filter 时必须同时传入 -get_info")
 	}
 
 	allocatorCtx, _ := chromedp.NewRemoteAllocator(
@@ -102,21 +106,63 @@ search_text、to_pagination、get_info不能同时传入，一次只能传入一
 			log.Fatalf("get_info 必须是有效的非负整数，收到: %q", *getInfo)
 		}
 
-		_ = idx
-		// 在已有搜索结果页面上，根据序号点击对应结果的超链接。
-		// 点击后会导航到目标页面，之后可将 html 转为 markdown 返回。
-		//
-		// 点击第 idx 个结果的 JS：
-		//   clickResultByIndex(idx)
-		//
-		// 用法示例：
-		//   err := chromedp.Run(ctx,
-		//       chromedp.Evaluate(clickResultJS(idx), nil),
-		//       chromedp.WaitReady(`body`, chromedp.ByQuery),
-		//   )
-		//   // 然后获取页面内容、转换 markdown、可选 filter 过滤
+		// 从搜索结果中提取第 idx 个结果的 href
+		var href string
+		err = chromedp.Run(ctx,
+			chromedp.Evaluate(getResultHrefJS(idx), &href),
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if href == "" {
+			log.Fatalf("未找到序号为 %d 的结果", idx)
+		}
 
-		// get_info 的点击与转换逻辑由使用者自行编排，DOM 定位原语已就绪
+		// 创建新标签页并直接导航到目标 URL
+		newCtx, closeTab := chromedp.NewContext(allocatorCtx)
+		defer closeTab()
+		newCtx, newCancel := context.WithTimeout(newCtx, 30*time.Second)
+		defer newCancel()
+
+		var html string
+		err = chromedp.Run(newCtx,
+			chromedp.Navigate(href),
+			chromedp.WaitReady(`body`, chromedp.ByQuery),
+			chromedp.Sleep(2*time.Second),
+			chromedp.Evaluate(`document.documentElement.outerHTML`, &html),
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// HTML 转 Markdown
+		converter := md.NewConverter("", true, &md.Options{
+			EscapeMode: "disabled",
+		})
+		markdown, err := converter.ConvertString(html)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		if strings.TrimSpace(*filter) != "" {
+			re := regexp2.MustCompile(*filter, 0)
+			var matches []string
+			m, err := re.FindStringMatch(markdown)
+			if err != nil {
+				log.Fatal(err)
+			}
+			for m != nil {
+				matches = append(matches, m.String())
+				m, err = re.FindNextMatch(m)
+				if err != nil {
+					log.Fatal(err)
+				}
+			}
+			fmt.Println(strings.Join(matches, "\n"))
+			return
+		}
+
+		fmt.Println(markdown)
 		return
 	}
 
@@ -263,26 +309,37 @@ const extractMaxPageJS = `(function(){
 	return max;
 })()`
 
-// clickResultJS 生成点击第 index 个搜索结果链接的 JavaScript。
+// getResultHrefJS 生成提取第 index 个搜索结果链接 href 的 JavaScript。
 // index 从 0 开始，与 extractSearchResultsJS 返回的 index 一致。
-func clickResultJS(index int) string {
+func getResultHrefJS(index int) string {
 	return fmt.Sprintf(`(function(){
 		var container = document.getElementById('rso');
-		if (!container) return '找不到搜索结果容器div#rso';
+		if (!container) return '';
 		var h3s = container.querySelectorAll('h3');
 		var count = 0;
 		var seen = {};
 		for (var i = 0; i < h3s.length; i++) {
+			if (isInsidePeopleAlsoAsk(h3s[i], container)) continue;
 			var a = h3s[i].closest('a');
 			if (!a) continue;
 			var href = a.href;
 			if (!href || seen[href]) continue;
 			seen[href] = true;
-			if (count === %d) { a.click(); return 'clicked'; }
+			if (count === %d) return href;
 			count++;
 		}
-		return '未找到序号为 %d 的结果';
-	})()`, index, index)
+		return '';
+
+		function isInsidePeopleAlsoAsk(el, rso) {
+			var block = el.parentElement;
+			while (block && block.parentElement !== rso) {
+				block = block.parentElement;
+			}
+			if (!block) return false;
+			var text = block.textContent;
+			return text.indexOf('People also ask') !== -1 || text.indexOf('相关问题') !== -1;
+		}
+	})()`, index)
 }
 
 // clickPaginationJS 生成点击分页中第 pageNum 页的 JavaScript。

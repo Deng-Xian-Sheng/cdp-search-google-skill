@@ -62,3 +62,17 @@ Google 搜索结果页底部分页导航：
 - 结果容器：`div#rso`（ID 稳定）
 - 每个结果：`h3` 在 `<a>` 内，通过 `h3.closest('a')` 定位
 - 需排除 "People also ask" / "相关问题" 区块中的 h3
+
+## html to markdown
+
+使用 https://github.com/JohannesKaufmann/html-to-markdown 库
+
+需要关闭转义：`md.WithEscapeMode("disabled")`
+
+## 二进制、git lfs、git排除文件
+
+debug时尽可能的使用go run而不是build一个二进制
+
+如果要构建debug时的二进制，请放到 debugBin 文件夹，该文件夹在git排除文件中
+
+如果要构建发布二进制，应放到bin文件夹，并确保它被git lfs管理
