@@ -14,12 +14,22 @@
 ./stop_browser.sh <PID>     # 关闭浏览器
 ```
 
+## 二进制
+
+| 文件 | 平台 |
+|------|------|
+| `bin/search-google-linux-amd64` | Linux x86_64 |
+| `bin/search-google-darwin-amd64` | macOS Intel |
+| `bin/search-google-darwin-arm64` | macOS Apple Silicon |
+
+以下示例以 Linux 为例。
+
 ## 用法
 
 ### 1. 搜索
 
 ```bash
-go run search.go -search_text "搜索关键词"
+./bin/search-google-linux-amd64 -search_text "搜索关键词"
 ```
 
 输出格式：
@@ -35,7 +45,7 @@ go run search.go -search_text "搜索关键词"
 拿到搜索结果后可以跳转到其他分页：
 
 ```bash
-go run search.go -to_pagination 2
+./bin/search-google-linux-amd64 -to_pagination 2
 ```
 
 页码范围 1~10（实际取 min(10, 最大分页)）。会输出该页的搜索结果。
@@ -45,7 +55,7 @@ go run search.go -to_pagination 2
 根据搜索结果中的序号查看页面详细内容：
 
 ```bash
-go run search.go -get_info 0
+./bin/search-google-linux-amd64 -get_info 0
 ```
 
 会新开标签页导航到目标 URL，获取完整 HTML 并转换为 Markdown 输出。
@@ -55,7 +65,7 @@ go run search.go -get_info 0
 查看详情时使用正则表达式过滤 Markdown 内容，大幅节省 token：
 
 ```bash
-go run search.go -get_info 0 -filter "正则表达式"
+./bin/search-google-linux-amd64 -get_info 0 -filter "正则表达式"
 ```
 
 正则引擎为 Go regexp2（支持零宽断言等高级特性）。
