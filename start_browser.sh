@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# 这是我的路径，如果你的谷歌浏览器不在PATH中，请你改成你的路径
 GoogleChromePath="/var/lib/linglong/layers/95cf712fbf6179ef4f8f709edcfcb5f88909894f29194fc19602eee2f45a2f6e/files/bin/google/chrome/google-chrome"
 
 CDP_PORT=9224
