@@ -1,13 +1,13 @@
 ---
 name: cdp-search-google
-description: 通过 chromedp 驱动本地 Chrome 浏览器执行 Google 搜索，返回结构化结果。支持搜索、翻页、查看详情和过滤详情。
+description: 通过 chromedp 驱动本地 Chrome 浏览器执行 Google 搜索，返回搜索结果。支持搜索、翻页、查看详情和过滤详情。
 metadata:
   type: skill
 ---
 
 # Google 搜索技能
 
-通过 chromedp 驱动本地 Chrome 浏览器执行 Google 搜索，返回结构化结果。
+通过 chromedp 驱动本地 Chrome 浏览器执行 Google 搜索，返回搜索结果。
 
 ## 使用
 
