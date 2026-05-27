@@ -9,7 +9,9 @@ metadata:
 
 通过 chromedp 驱动本地 Chrome 浏览器执行 Google 搜索，返回结构化结果。
 
-## 前置条件
+## 使用
+
+### 前置条件
 
 需要先启动调试浏览器：
 ```bash
@@ -21,7 +23,7 @@ metadata:
 ./stop_browser.sh <PID>     # 关闭浏览器
 ```
 
-## 二进制
+### 二进制
 
 | 文件 | 平台 |
 |------|------|
@@ -31,9 +33,9 @@ metadata:
 
 以下示例以 Linux 为例。
 
-## 用法
+### 用法
 
-### 1. 搜索
+#### 1. 搜索
 
 ```bash
 ./bin/search-google-linux-amd64 -search_text "搜索关键词"
@@ -47,7 +49,7 @@ metadata:
 ...
 ```
 
-### 2. 翻页
+#### 2. 翻页
 
 拿到搜索结果后可以跳转到其他分页：
 
@@ -57,7 +59,7 @@ metadata:
 
 页码范围 1~10（实际取 min(10, 最大分页)）。会输出该页的搜索结果。
 
-### 3. 查看详情
+#### 3. 查看详情
 
 根据搜索结果中的序号查看页面详细内容：
 
@@ -67,17 +69,20 @@ metadata:
 
 会新开标签页导航到目标 URL，获取完整 HTML 并转换为 Markdown 输出。
 
-### 4. 过滤详情（推荐）
+#### 4. 过滤详情（推荐）
 
-查看详情时使用正则表达式过滤 Markdown 内容，大幅节省 token：
+查看详情时使用**正则表达式**过滤 Markdown 内容，大幅节省 token：
 
 ```bash
 ./bin/search-google-linux-amd64 -get_info 0 -filter "正则表达式"
 ```
 
+- 善用捕获组
+- 通过正则使其输出被匹配的整行
+
 正则引擎为 Go regexp2（支持零宽断言等高级特性）。
 
-## 约束
+### 约束
 
 - `search_text`、`to_pagination`、`get_info` 不能同时传入，一次只能用一个操作
 - `-filter` 必须与 `-get_info` 一起使用
@@ -85,5 +90,5 @@ metadata:
 
 ## 注意事项
 
-- 仅支持macos和linux
+- **仅支持macos和linux**
 - 如果用户说谷歌浏览器已经安装了，但是你发现 start_browser.sh 提示找不到谷歌浏览器，那说明不在PATH中，你可以查找谷歌浏览器的二进制路径并编辑 start_browser.sh 修改 GoogleChromePath 变量。
